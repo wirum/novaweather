@@ -1,215 +1,318 @@
-<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NovaSquall V9.1</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!DOCTYPE html>
+<html>
 
-<!-- Firebase SDK (modular, via CDN ESM) -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getDatabase, ref, onValue, onDisconnect } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+<head>
+  <meta charset="UTF-8">
+  <title>NovaWeather V9.4</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-  // ==========================================================
-  // ===== CONFIGURAÇÃO DO FIREBASE — PREENCHA AQUI ===========
-  // ==========================================================
-  // Copie estes valores do Console do Firebase:
-  // Configurações do projeto > Geral > "Seus aplicativos" > SDK de configuração
-  const firebaseConfig = {
-    apiKey: "AIzaSyAVUbyKXt0FZvql6w1FZd2XcIIE-bFkm8M",
-    authDomain: "novasquall-90a5a.firebaseapp.com",
-    databaseURL: "https://novasquall-90a5a-default-rtdb.firebaseio.com",
-    projectId: "novasquall-90a5a",
-    storageBucket: "novasquall-90a5a.firebasestorage.app",
-    messagingSenderId: "398853874030",
-    appId: "1:398853874030:web:3dd407c439161c8326a17f"
-  };
-  // ==========================================================
+  <!-- Firebase SDK (modular, via CDN ESM) -->
+  <script type="module">
+    import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import {getDatabase, ref, onValue, onDisconnect} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
-  const currentRef = ref(db, "NovaSquall/current");
+    // ==========================================================
+    // ===== CONFIGURAÇÃO DO FIREBASE — PREENCHA AQUI ===========
+    // ==========================================================
+    // Copie estes valores do Console do Firebase:
+    // Configurações do projeto > Geral > "Seus aplicativos" > SDK de configuração
+    const firebaseConfig = {
+      apiKey: "AIzaSyAVUbyKXt0FZvql6w1FZd2XcIIE-bFkm8M",
+      authDomain: "novasquall-90a5a.firebaseapp.com",
+      databaseURL: "https://novasquall-90a5a-default-rtdb.firebaseio.com",
+      projectId: "novasquall-90a5a",
+      storageBucket: "novasquall-90a5a.firebasestorage.app",
+      messagingSenderId: "398853874030",
+      appId: "1:398853874030:web:3dd407c439161c8326a17f"
+    };
+    // ==========================================================
 
-  // ---- Estado / valores padrão seguros (evita undefined/NaN) ----
-  const DEFAULTS = {
-    kmh: 0, rpm: 0, m_vel: 0, odo: 0,
-    temp: 0, humidity: null, press: 0, rssi: 0
-  };
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const currentRef = ref(db, "NovaSquall/current");
 
-  const MAXPTS = 20;
-  let lastUpdateTs = 0;
-  let watchdogTimer = null;
-
-  // ---- Elementos ----
-  const els = {
-    kmh: document.getElementById('kmh'),
-    rpm: document.getElementById('rpm'),
-    max_vel: document.getElementById('max_vel'),
-    odo: document.getElementById('odo'),
-    temp: document.getElementById('temp'),
-    humidity: document.getElementById('humidity'),
-    press_val: document.getElementById('press_val'),
-    rssi: document.getElementById('rssi'),
-    statusDot: document.getElementById('statusDot'),
-    statusText: document.getElementById('statusText'),
-  };
-
-  // ---- Chart.js ----
-  const ctx = document.getElementById('mainChart').getContext('2d');
-  const chart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: [],
-      datasets: [
-        { label: 'km/h', data: [], borderColor: '#3498db', yAxisID: 'y', tension: 0.4, fill: true, backgroundColor: 'rgba(52, 152, 219, 0.1)' },
-        { label: 'Temp (°C)', data: [], borderColor: '#e74c3c', yAxisID: 'y1', tension: 0.4 },
-        { label: 'hPa', data: [], borderColor: '#2ecc71', yAxisID: 'y1', tension: 0.4 },
-        { label: 'Umidade (%)', data: [], borderColor: '#f39c12', yAxisID: 'y1', tension: 0.4, borderDash: [4, 3] }
-      ]
-    },
-    options: {
-      responsive: true,
-      scales: {
-        // Uma única escala secundária (y1) compartilhada por Temp/Pressão/Umidade
-        // evita poluir o gráfico com 4 eixos. km/h fica isolado em y (unidade própria).
-        y:  { type: 'linear', position: 'left',  grid: { color: '#333' }, title: { display: true, text: 'km/h', color: '#3498db' } },
-        y1: { type: 'linear', position: 'right', grid: { display: false }, title: { display: true, text: 'Temp / hPa / Umid.', color: '#888' } }
-      },
-      plugins: { legend: { display: true, labels: { color: '#888', boxWidth: 10 } } },
-      animation: false
-    }
-  });
-
-  function pushPoint(d) {
-    const now = new Date().toLocaleTimeString();
-    chart.data.labels.push(now);
-    chart.data.datasets[0].data.push(d.kmh);
-    chart.data.datasets[1].data.push(d.temp);
-    chart.data.datasets[2].data.push(d.press);
-    chart.data.datasets[3].data.push(d.humidity ?? null);
-
-    if (chart.data.labels.length > MAXPTS) {
-      chart.data.labels.shift();
-      chart.data.datasets.forEach(ds => ds.data.shift());
-    }
-    chart.update();
-  }
-
-  // ---- CSV export a partir do que está carregado no navegador ----
-  // Nota: por enquanto exporta apenas os pontos já vistos nesta sessão
-  // (equivalente ao que está no gráfico). Um histórico completo requer
-  // NovaSquall/history no Firebase (ver comentário mais abaixo).
-  window.exportCSV = function () {
-    const labels = chart.data.labels;
-    if (!labels.length) {
-      alert("Ainda não há dados suficientes nesta sessão para exportar.\nO histórico completo (Firebase) ainda não foi implementado.");
-      return;
-    }
-    let csv = "Hora,Vel_kmh,Temp_C,Press_hPa,Umidade_pct\n";
-    for (let i = 0; i < labels.length; i++) {
-      csv += [
-        labels[i],
-        chart.data.datasets[0].data[i],
-        chart.data.datasets[1].data[i],
-        chart.data.datasets[2].data[i],
-        chart.data.datasets[3].data[i] ?? ""
-      ].join(",") + "\n";
-    }
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "novasquall_log_sessao.csv";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
-
-  // ---- Status ONLINE / OFFLINE ----
-  function setStatus(online, label) {
-    els.statusDot.style.color = online ? '#2ecc71' : '#e74c3c';
-    els.statusText.innerText = label;
-  }
-
-  function armWatchdog() {
-    // Se não chegar nenhum valor novo em 8s, considera o ESP32 offline
-    // (mesmo que a conexão com o Firebase esteja OK).
-    clearTimeout(watchdogTimer);
-    watchdogTimer = setTimeout(() => {
-      setStatus(false, 'SEM DADOS DO ESP32');
-    }, 8000);
-  }
-
-  function safeNumber(v, fallback) {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-  }
-
-  onValue(currentRef, (snapshot) => {
-    const raw = snapshot.val();
-
-    if (!raw) {
-      setStatus(false, 'SEM DADOS');
-      return;
-    }
-
-    const d = {
-      kmh: safeNumber(raw.kmh, DEFAULTS.kmh),
-      rpm: safeNumber(raw.rpm, DEFAULTS.rpm),
-      m_vel: safeNumber(raw.m_vel, DEFAULTS.m_vel),
-      odo: safeNumber(raw.odo, DEFAULTS.odo),
-      temp: safeNumber(raw.temp, DEFAULTS.temp),
-      humidity: (raw.humidity === undefined || raw.humidity === null) ? null : safeNumber(raw.humidity, null),
-      press: safeNumber(raw.press, DEFAULTS.press),
-      rssi: safeNumber(raw.rssi, DEFAULTS.rssi),
+    // ---- Estado / valores padrão seguros (evita undefined/NaN) ----
+    const DEFAULTS = {
+      kmh: 0, rpm: 0, m_vel: 0, odo: 0,
+      temp: 0, humidity: null, press: 0, rssi: 0
     };
 
-    els.kmh.innerText = d.kmh.toFixed(1);
-    els.rpm.innerText = Math.round(d.rpm);
-    els.max_vel.innerText = d.m_vel.toFixed(1);
-    els.odo.innerText = d.odo.toFixed(1);
-    els.temp.innerText = d.temp.toFixed(1);
-    els.humidity.innerText = (d.humidity === null) ? "—" : d.humidity.toFixed(0);
-    els.press_val.innerText = d.press.toFixed(1);
-    els.rssi.innerText = d.rssi;
+    const MAXPTS = 20;
+    let lastUpdateTs = 0;
+    let watchdogTimer = null;
 
-    pushPoint(d);
-    setStatus(true, 'ONLINE');
-    lastUpdateTs = Date.now();
-    armWatchdog();
-  }, (error) => {
-    console.error("Erro Firebase:", error);
-    setStatus(false, 'ERRO FIREBASE');
-  });
+    // ---- Elementos ----
+    const els = {
+      kmh: document.getElementById('kmh'),
+      rpm: document.getElementById('rpm'),
+      max_vel: document.getElementById('max_vel'),
+      odo: document.getElementById('odo'),
+      temp: document.getElementById('temp'),
+      humidity: document.getElementById('humidity'),
+      press_val: document.getElementById('press_val'),
+      rssi: document.getElementById('rssi'),
+      statusDot: document.getElementById('statusDot'),
+      statusText: document.getElementById('statusText'),
+    };
 
-  // Se o navegador perder a conexão de rede, sinaliza também
-  window.addEventListener('offline', () => setStatus(false, 'SEM INTERNET'));
-</script>
+    // ---- Chart.js ----
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {label: 'km/h', data: [], borderColor: '#3498db', yAxisID: 'y', tension: 0.4, fill: true, backgroundColor: 'rgba(52, 152, 219, 0.1)'},
+          {label: 'Temp (°C)', data: [], borderColor: '#e74c3c', yAxisID: 'y1', tension: 0.4},
+          {label: 'hPa', data: [], borderColor: '#2ecc71', yAxisID: 'y1', tension: 0.4},
+          {label: 'Umidade (%)', data: [], borderColor: '#f39c12', yAxisID: 'y1', tension: 0.4, borderDash: [4, 3]}
+        ]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          // Uma única escala secundária (y1) compartilhada por Temp/Pressão/Umidade
+          // evita poluir o gráfico com 4 eixos. km/h fica isolado em y (unidade própria).
+          y: {type: 'linear', position: 'left', grid: {color: '#333'}, title: {display: true, text: 'km/h', color: '#3498db'}},
+          y1: {type: 'linear', position: 'right', grid: {display: false}, title: {display: true, text: 'Temp / hPa / Umid.', color: '#888'}}
+        },
+        plugins: {legend: {display: true, labels: {color: '#888', boxWidth: 10}}},
+        animation: false
+      }
+    });
 
-<style>
-  body{font-family:sans-serif;background:#121212;color:#a0a0a0;text-align:center;margin:0;padding:20px;}
-  .logo-text { font-size: 2.5em; font-weight: 900; color: #3498db; margin-bottom: 0;}
-  .logo-text span { color: #ffffff; }
-  .sub-logo { font-size: 0.7em; color: #444; font-weight: bold; letter-spacing: 3px; margin-bottom: 8px; text-transform: uppercase; }
-  .status-line { font-size: 0.75em; font-weight: bold; letter-spacing: 1px; margin-bottom: 20px; }
-  .card{background:#1e1e1e;padding:20px;margin:10px auto;width:95%;max-width:650px;border-radius:15px;border: 1px solid #333;}
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
-  .stat-box { background: #151515; padding: 10px; border-radius: 10px; border-left: 3px solid #3498db; }
-  .value { display: block; font-size: 1.5em; color: #3498db; font-weight: bold; }
-  .btn-download { background:#3498db; color:white; text-decoration:none; padding:12px; border-radius:8px; display:block; margin-top:20px; font-weight:bold; border:none; width:100%; font-size:1em; cursor:pointer; }
-  .btn-download:hover { background:#2f83b8; }
-</style></head>
+    function pushPoint(d) {
+      const now = new Date().toLocaleTimeString();
+      chart.data.labels.push(now);
+      chart.data.datasets[0].data.push(d.kmh);
+      chart.data.datasets[1].data.push(d.temp);
+      chart.data.datasets[2].data.push(d.press);
+      chart.data.datasets[3].data.push(d.humidity ?? null);
+
+      if (chart.data.labels.length > MAXPTS) {
+        chart.data.labels.shift();
+        chart.data.datasets.forEach(ds => ds.data.shift());
+      }
+      chart.update();
+    }
+
+    // ---- CSV export a partir do que está carregado no navegador ----
+    // Nota: por enquanto exporta apenas os pontos já vistos nesta sessão
+    // (equivalente ao que está no gráfico). Um histórico completo requer
+    // NovaSquall/history no Firebase (ver comentário mais abaixo).
+    window.exportCSV = function () {
+      const labels = chart.data.labels;
+      if (!labels.length) {
+        alert("Ainda não há dados suficientes nesta sessão para exportar.\nO histórico completo (Firebase) ainda não foi implementado.");
+        return;
+      }
+      let csv = "Hora,Vel_kmh,Temp_C,Press_hPa,Umidade_pct\n";
+      for (let i = 0; i < labels.length; i++) {
+        csv += [
+          labels[i],
+          chart.data.datasets[0].data[i],
+          chart.data.datasets[1].data[i],
+          chart.data.datasets[2].data[i],
+          chart.data.datasets[3].data[i] ?? ""
+        ].join(",") + "\n";
+      }
+      const blob = new Blob([csv], {type: "text/csv"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "novasquall_log_sessao.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    };
+
+    // ---- Status ONLINE / OFFLINE ----
+    function setStatus(online, label) {
+      els.statusDot.style.color = online ? '#2ecc71' : '#e74c3c';
+      els.statusText.innerText = label;
+    }
+
+    function armWatchdog() {
+      // Se não chegar nenhum valor novo em 8s, considera o ESP32 offline
+      // (mesmo que a conexão com o Firebase esteja OK).
+      clearTimeout(watchdogTimer);
+      watchdogTimer = setTimeout(() => {
+        setStatus(false, 'SEM DADOS DO ESP32');
+      }, 8000);
+    }
+
+    function safeNumber(v, fallback) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    onValue(currentRef, (snapshot) => {
+      const raw = snapshot.val();
+
+      if (!raw) {
+        setStatus(false, 'SEM DADOS');
+        return;
+      }
+
+      const d = {
+        kmh: safeNumber(raw.kmh, DEFAULTS.kmh),
+        rpm: safeNumber(raw.rpm, DEFAULTS.rpm),
+        m_vel: safeNumber(raw.m_vel, DEFAULTS.m_vel),
+        odo: safeNumber(raw.odo, DEFAULTS.odo),
+        temp: safeNumber(raw.temp, DEFAULTS.temp),
+        humidity: (raw.humidity === undefined || raw.humidity === null) ? null : safeNumber(raw.humidity, null),
+        press: safeNumber(raw.press_sea, DEFAULTS.press),
+        rssi: safeNumber(raw.rssi, DEFAULTS.rssi),
+      };
+      els.odo.innerText = d.odo.toFixed(1);
+      els.temp.innerText = d.temp.toFixed(1);
+      els.humidity.innerText = (d.humidity === null) ? "—" : d.humidity.toFixed(0);
+      els.press_val.innerText = d.press.toFixed(1);
+      els.rssi.innerText = d.rssi;
+
+      pushPoint(d);
+      setStatus(true, 'ONLINE');
+      lastUpdateTs = Date.now();
+      armWatchdog();
+    }, (error) => {
+      console.error("Erro Firebase:", error);
+      setStatus(false, 'ERRO FIREBASE');
+    });
+
+    // Se o navegador perder a conexão de rede, sinaliza também
+    window.addEventListener('offline', () => setStatus(false, 'SEM INTERNET'));
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Clarity+City:ital,wght@0,100..900;1,100..900&display=swap');
+
+    body {
+      font-family: "Clarity City", sans-serif;
+      background: #121212;
+      color: #a0a0a0;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+      font-optical-sizing: auto;
+      font-weight: 500;
+      font-style: normal;
+    }
+
+    .logo-text {
+      font-size: 2.5em;
+      font-weight: 900;
+      color: #3498db;
+      margin-bottom: 0;
+    }
+
+    .logo-text span {
+      color: #ffffff;
+    }
+
+    .sub-logo {
+      font-size: 0.7em;
+      color: #444;
+      font-weight: bold;
+      letter-spacing: 3px;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .status-line {
+      font-size: 0.75em;
+      font-weight: bold;
+      letter-spacing: 1px;
+      margin-bottom: 20px;
+    }
+
+    .card {
+      background: #1e1e1e;
+      padding: 20px;
+      margin: 10px auto;
+      width: 95%;
+      max-width: 650px;
+      border-radius: 15px;
+      border: 1px solid #333;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+
+    .stat-box {
+      background: #151515;
+      padding: 10px;
+      border-radius: 10px;
+      border-left: 3px solid #3498db;
+    }
+
+    .value {
+      display: block;
+      font-size: 1.5em;
+      color: #3498db;
+      font-weight: bold;
+    }
+
+    .btn-download {
+      background: #3498db;
+      color: white;
+      text-decoration: none;
+      padding: 12px;
+      border-radius: 8px;
+      display: block;
+      margin-top: 20px;
+      font-weight: bold;
+      border: none;
+      width: 100%;
+      font-size: 1em;
+      cursor: pointer;
+    }
+
+    .btn-download:hover {
+      background: #2f83b8;
+    }
+  </style>
+</head>
+
 <body>
-  <div class="logo-text">NOVA<span>SQUALL</span></div>
-  <div class="sub-logo">ULTRA STABLE V9.1</div>
+  <div class="logo-text">Nova<span>Weather</span></div>
+  <div class="sub-logo">9.4</div>
   <div class="status-line"><span id="statusDot">●</span> <span id="statusText">CONECTANDO...</span></div>
-  <div class="card">
-    <div class="grid">
-      <div class="stat-box"><span>Velocidade</span><span id="kmh" class="value">0</span><span>km/h</span></div>
-      <div class="stat-box"><span>RPM</span><span id="rpm" class="value">0</span><span>rot/min</span></div>
-      <div class="stat-box" style="border-left-color: #e74c3c;"><span>Pico Vel.</span><span id="max_vel" class="value" style="color:#e74c3c">0</span><span>km/h</span></div>
-      <div class="stat-box" style="border-left-color: #2ecc71;"><span>Pressão</span><span id="press_val" class="value" style="color:#2ecc71">0</span><span>hPa</span></div>
+    <div class="card">
+      <div class="grid">
+        <div class="stat-box" style="border-left-color: #2ecc71;">
+          <span>Pressão</span>
+          <span id="press_val" class="value" style="color:#2ecc71">0.0</span>
+          <span>hPa</span>
+        </div>
+
+        <div class="stat-box" style="border-left-color: #f39c12;">
+          <span>Umidade</span>
+          <span id="humidity" class="value" style="color:#f39c12">—</span>
+          <span>%</span>
+        </div>
+
+        <div class="stat-box" style="border-left-color: #e74c3c;">
+          <span>Temperatura</span>
+          <span id="temp" class="value" style="color:#e74c3c">0.0</span>
+          <span>°C</span>
+        </div>
+
+        <div class="stat-box" style="border-left-color: #3498db;">
+          <span>Velocidade</span>
+          <span id="kmh" class="value" style="color:#3498db">0.0</span>
+          <span>km/h</span>
+        </div>
+
+      </div>
+      <p> Odo: <span id="odo">0</span> m | RSSI: <span id="rssi">0</span> dBm</p>
+      <canvas id="mainChart"></canvas>
+      <button class="btn-download" onclick="exportCSV()">BAIXAR LOG (CSV)</button>
     </div>
-    <p>Temp: <span id="temp">0</span>°C | Umidade: <span id="humidity">—</span>% | Odo: <span id="odo">0</span> m | RSSI: <span id="rssi">0</span> dBm</p>
-    <canvas id="mainChart"></canvas>
-    <button class="btn-download" onclick="exportCSV()">BAIXAR LOG (CSV)</button>
-  </div>
-</body></html>
+  </body>
+</html>
