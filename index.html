@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 
 <head>
   <meta charset="UTF-8">
@@ -56,31 +56,37 @@
       statusText: document.getElementById('statusText'),
     };
 
-    // ---- Chart.js ----
-    const ctx = document.getElementById('mainChart').getContext('2d');
-    const chart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [
-          {label: 'km/h', data: [], borderColor: '#3498db', yAxisID: 'y', tension: 0.4, fill: true, backgroundColor: 'rgba(52, 152, 219, 0.1)'},
-          {label: 'Temp (°C)', data: [], borderColor: '#e74c3c', yAxisID: 'y1', tension: 0.4},
-          {label: 'hPa', data: [], borderColor: '#2ecc71', yAxisID: 'y1', tension: 0.4},
-          {label: 'Umidade (%)', data: [], borderColor: '#f39c12', yAxisID: 'y1', tension: 0.4, borderDash: [4, 3]}
-        ]
-      },
-      options: {
-        responsive: true,
-        scales: {
-          // Uma única escala secundária (y1) compartilhada por Temp/Pressão/Umidade
-          // evita poluir o gráfico com 4 eixos. km/h fica isolado em y (unidade própria).
-          y: {type: 'linear', position: 'left', grid: {color: '#333'}, title: {display: true, text: 'km/h', color: '#3498db'}},
-          y1: {type: 'linear', position: 'right', grid: {display: false}, title: {display: true, text: 'Temp / hPa / Umid.', color: '#888'}}
+    // Meteograma observado: faixas independentes com o mesmo eixo de tempo.
+    const labels = [];
+    const definitions = [
+      {id:'mainChart', label:'Velocidade', unit:'km/h', color:'#9bb8c7', min:0},
+      {id:'tempChart', label:'Temperatura', unit:'°C', color:'#d6ab8e'},
+      {id:'pressChart', label:'Pressão', unit:'hPa', color:'#b8c4a5'},
+      {id:'humidityChart', label:'Umidade', unit:'%', color:'#8fbbb5', min:0, max:100}
+    ];
+    const plots = definitions.map((def) => new Chart(document.getElementById(def.id), {
+      type:'line',
+      data:{labels, datasets:[{label:def.label, data:[], borderColor:def.color,
+        backgroundColor:def.id === 'humidityChart' ? 'rgba(143,187,181,.08)' : 'transparent',
+        fill:def.id === 'humidityChart', tension:0, borderWidth:1.8, pointRadius:2, pointHoverRadius:4}]},
+      options:{responsive:true, maintainAspectRatio:false, animation:false,
+        interaction:{mode:'index', intersect:false},
+        layout:{padding:{right:8}},
+        scales:{
+          x:{grid:{color:'#292f2a',drawTicks:false}, border:{display:false},
+            ticks:{display:def.id === 'mainChart',color:'#a1aaa2',maxTicksLimit:5,maxRotation:0,font:{size:10},padding:10}},
+          y:{min:def.min,max:def.max,afterFit:axis=>{axis.width=60;},
+            grid:{color:'#303630',drawTicks:false},border:{display:false},
+            ticks:{color:'#a1aaa2',maxTicksLimit:3,font:{family:'Consolas,monospace',size:10},padding:8}}
         },
-        plugins: {legend: {display: true, labels: {color: '#888', boxWidth: 10}}},
-        animation: false
+        plugins:{legend:{display:false},tooltip:{backgroundColor:'#e8e9e3',titleColor:'#20251f',bodyColor:'#20251f',
+          cornerRadius:2,padding:10,displayColors:false,
+          callbacks:{label:context=>def.label+': '+context.parsed.y.toLocaleString('pt-BR')+' '+def.unit}}}
       }
-    });
+    }));
+    // Mantém a ordem das colunas da exportação original.
+    const chart = {data:{labels,datasets:plots.map(plot=>plot.data.datasets[0])},
+      update:()=>plots.forEach(plot=>plot.update())};
 
     function pushPoint(d) {
       const now = new Date().toLocaleTimeString();
@@ -95,6 +101,8 @@
         chart.data.datasets.forEach(ds => ds.data.shift());
       }
       chart.update();
+      document.getElementById('emptyNote').hidden = true;
+      document.getElementById('lastReading').textContent = now;
     }
 
     // ---- CSV export a partir do que está carregado no navegador ----
@@ -130,7 +138,7 @@
 
     // ---- Status ONLINE / OFFLINE ----
     function setStatus(online, label) {
-      els.statusDot.style.color = online ? '#2ecc71' : '#e74c3c';
+      els.statusDot.style.color = online ? '#65c69c' : '#e58c81';
       els.statusText.innerText = label;
     }
 
@@ -166,6 +174,7 @@
         press: safeNumber(raw.press_sea, DEFAULTS.press),
         rssi: safeNumber(raw.rssi, DEFAULTS.rssi),
       };
+      els.kmh.innerText = d.kmh.toFixed(1);
       els.odo.innerText = d.odo.toFixed(1);
       els.temp.innerText = d.temp.toFixed(1);
       els.humidity.innerText = (d.humidity === null) ? "—" : d.humidity.toFixed(0);
@@ -186,133 +195,56 @@
   </script>
 
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Clarity+City:ital,wght@0,100..900;1,100..900&display=swap');
-
-    body {
-      font-family: "Clarity City", sans-serif;
-      background: #121212;
-      color: #a0a0a0;
-      text-align: center;
-      margin: 0;
-      padding: 20px;
-      font-optical-sizing: auto;
-      font-weight: 500;
-      font-style: normal;
-    }
-
-    .logo-text {
-      font-size: 2.5em;
-      font-weight: 900;
-      color: #3498db;
-      margin-bottom: 0;
-    }
-
-    .logo-text span {
-      color: #ffffff;
-    }
-
-    .sub-logo {
-      font-size: 0.7em;
-      color: #444;
-      font-weight: bold;
-      letter-spacing: 3px;
-      margin-bottom: 8px;
-      text-transform: uppercase;
-    }
-
-    .status-line {
-      font-size: 0.75em;
-      font-weight: bold;
-      letter-spacing: 1px;
-      margin-bottom: 20px;
-    }
-
-    .card {
-      background: #1e1e1e;
-      padding: 20px;
-      margin: 10px auto;
-      width: 95%;
-      max-width: 650px;
-      border-radius: 15px;
-      border: 1px solid #333;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-bottom: 15px;
-    }
-
-    .stat-box {
-      background: #151515;
-      padding: 10px;
-      border-radius: 10px;
-      border-left: 3px solid #3498db;
-    }
-
-    .value {
-      display: block;
-      font-size: 1.5em;
-      color: #3498db;
-      font-weight: bold;
-    }
-
-    .btn-download {
-      background: #3498db;
-      color: white;
-      text-decoration: none;
-      padding: 12px;
-      border-radius: 8px;
-      display: block;
-      margin-top: 20px;
-      font-weight: bold;
-      border: none;
-      width: 100%;
-      font-size: 1em;
-      cursor: pointer;
-    }
-
-    .btn-download:hover {
-      background: #2f83b8;
-    }
-  </style>
+    :root {color-scheme:dark;--bg:#171918;--panel:#1b1e1c;--border:#393e3a;--text:#e8e9e3;--muted:#a1aaa2;--blue:#9bb8c7}
+    *{box-sizing:border-box}
+    body{margin:0;padding:40px 24px;background:var(--bg);color:var(--text);font-family:"Segoe UI",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+    .dashboard{max-width:1000px;margin:auto}
+    .header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:22px;border-bottom:1px solid #777f73;margin-bottom:28px}
+    .logo-text{margin:0;color:var(--text);font-size:25px;font-weight:650;letter-spacing:-1px}.logo-text span{font-weight:350}
+    .sub-logo{margin:6px 0 0;color:var(--muted);font-size:12px}
+    .status-line{display:flex;gap:8px;align-items:center;font:11px Consolas,monospace;color:var(--muted)}#statusDot{color:#a1aaa2}
+    .section-heading{display:flex;justify-content:space-between;gap:16px;align-items:baseline;margin-bottom:20px}h2{font-size:14px;font-weight:600;margin:0}.caption{color:var(--muted);font-size:12px}
+    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--border);padding-bottom:24px}
+    .stat-box{padding:0 24px;border-right:1px solid var(--border)}.stat-box:first-child{padding-left:0}.stat-box:last-child{border:0}
+    .stat-label{display:block;color:var(--muted);font-size:12px;margin-bottom:12px}.reading{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+    .value{font-family:Consolas,"Courier New",monospace;font-size:34px;font-weight:400;letter-spacing:-1.5px;font-variant-numeric:tabular-nums}.unit{font-size:12px;color:var(--muted)}
+    .telemetry{display:flex;gap:24px;flex-wrap:wrap;padding:12px 0 32px;color:var(--muted);font-size:11px}.telemetry strong{color:var(--text);font-weight:400;font-variant-numeric:tabular-nums}.updated{margin-left:auto}
+    .card{border-top:1px solid #777f73;padding-top:22px}.chart-heading{display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-bottom:22px}.chart-heading h2{font-size:19px;font-weight:500;letter-spacing:-.4px}.chart-heading p{margin:0}
+    .meteo-row{display:grid;grid-template-columns:115px minmax(0,1fr);border-top:1px solid #303630;padding:12px 0 4px}.meteo-label{padding-top:6px;font-size:12px;color:var(--text)}.meteo-label small{display:block;margin-top:5px;color:var(--muted);font:11px Consolas,monospace}.chart-wrap{position:relative;height:112px;min-width:0}.meteo-row:last-of-type .chart-wrap{height:138px}
+    .empty-note{color:var(--muted);font-size:12px;margin:0 0 16px;border-left:2px solid #86957e;padding:8px 12px;background:#1d221e}.empty-note[hidden]{display:none}
+    .card-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;border-top:1px solid var(--border);padding-top:16px;margin-top:12px}.btn-download{background:transparent;border:1px solid #687464;color:var(--text);border-radius:3px;padding:10px 15px;font:12px "Segoe UI",sans-serif;cursor:pointer}.btn-download:hover{background:#30382f}.btn-download:focus-visible{outline:2px solid #bed0b5;outline-offset:4px}.footer{display:flex;justify-content:space-between;color:var(--muted);font:10px Consolas,monospace;letter-spacing:.6px;margin-top:26px}
+    @media(max-width:640px){body{padding:24px 16px}.header{flex-wrap:wrap;gap:14px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:24px}.stat-box{padding:0 16px}.stat-box:nth-child(odd){padding-left:0}.stat-box:nth-child(2){border:0}.value{font-size:29px}.telemetry{gap:12px}.updated{margin-left:0;width:100%}.chart-heading{display:block}.chart-heading p{margin-top:6px}.meteo-label{font-size:11px}.meteo-row{grid-template-columns:78px minmax(0,1fr)}.card-footer{align-items:flex-start;flex-direction:column}.btn-download{width:100%}}
+</style>
 </head>
 
 <body>
-  <div class="logo-text">Nova<span>Weather</span></div>
-  <div class="sub-logo">9.4</div>
-  <div class="status-line"><span id="statusDot">●</span> <span id="statusText">CONECTANDO...</span></div>
-    <div class="card">
-      <div class="grid">
-        <div class="stat-box" style="border-left-color: #2ecc71;">
-          <span>Pressão</span>
-          <span id="press_val" class="value" style="color:#2ecc71">0.0</span>
-          <span>hPa</span>
-        </div>
-
-        <div class="stat-box" style="border-left-color: #f39c12;">
-          <span>Umidade</span>
-          <span id="humidity" class="value" style="color:#f39c12">—</span>
-          <span>%</span>
-        </div>
-
-        <div class="stat-box" style="border-left-color: #e74c3c;">
-          <span>Temperatura</span>
-          <span id="temp" class="value" style="color:#e74c3c">0.0</span>
-          <span>°C</span>
-        </div>
-
-        <div class="stat-box" style="border-left-color: #3498db;">
-          <span>Velocidade</span>
-          <span id="kmh" class="value" style="color:#3498db">0.0</span>
-          <span>km/h</span>
-        </div>
-
+  <main class="dashboard">
+    <header class="header">
+      <div class="brand">
+        <div><h1 class="logo-text">Nova<span>Weather</span></h1><p class="sub-logo">Estação meteorológica · v9.4</p></div>
       </div>
-      <p> Odo: <span id="odo">0</span> m | RSSI: <span id="rssi">0</span> dBm</p>
-      <canvas id="mainChart"></canvas>
-      <button class="btn-download" onclick="exportCSV()">BAIXAR LOG (CSV)</button>
-    </div>
-  </body>
+      <div class="status-line" role="status"><span id="statusDot" aria-hidden="true">●</span><span id="statusText">CONECTANDO...</span></div>
+    </header>
+    <section aria-labelledby="overview-title">
+      <div class="section-heading"><h2 id="overview-title">Condições atuais</h2><span class="caption">Sensores ESP32</span></div>
+      <div class="grid">
+        <div class="stat-box" style="--accent:#65c69c"><span class="stat-label">Pressão</span><div class="reading"><span id="press_val" class="value">—</span><span class="unit">hPa</span></div></div>
+        <div class="stat-box" style="--accent:#e7b664"><span class="stat-label">Umidade</span><div class="reading"><span id="humidity" class="value">—</span><span class="unit">%</span></div></div>
+        <div class="stat-box" style="--accent:#e58c81"><span class="stat-label">Temperatura</span><div class="reading"><span id="temp" class="value">—</span><span class="unit">°C</span></div></div>
+        <div class="stat-box" style="--accent:#54a9e5"><span class="stat-label">Velocidade</span><div class="reading"><span id="kmh" class="value">—</span><span class="unit">km/h</span></div></div>
+      </div>
+      <div class="telemetry"><span>Odômetro <strong><span id="odo">—</span> m</strong></span><span>Sinal Wi-Fi <strong><span id="rssi">—</span> dBm</strong></span><span class="updated">Última leitura <strong id="lastReading">—</strong></span></div>
+    </section>
+    <section class="card" aria-labelledby="chart-title">
+      <div class="chart-heading"><h2 id="chart-title">Meteograma</h2><p class="caption">Observações da sessão · últimas 20 leituras</p></div>
+      <p id="emptyNote" class="empty-note" role="status">Aguardando leituras da estação.</p>
+      <div class="meteo-row"><div class="meteo-label">Temperatura<small>°C</small></div><div class="chart-wrap"><canvas id="tempChart" role="img" aria-label="Temperatura por horário"></canvas></div></div>
+      <div class="meteo-row"><div class="meteo-label">Umidade<small>%</small></div><div class="chart-wrap"><canvas id="humidityChart" role="img" aria-label="Umidade por horário"></canvas></div></div>
+      <div class="meteo-row"><div class="meteo-label">Pressão<small>hPa</small></div><div class="chart-wrap"><canvas id="pressChart" role="img" aria-label="Pressão por horário"></canvas></div></div>
+      <div class="meteo-row"><div class="meteo-label">Velocidade<small>km/h</small></div><div class="chart-wrap"><canvas id="mainChart" role="img" aria-label="Velocidade por horário"></canvas></div></div>
+      <div class="card-footer"><span class="caption">Horário local · escalas independentes</span><button class="btn-download" onclick="exportCSV()">Baixar log CSV</button></div>
+    </section>
+    <footer class="footer"><span>NOVAWEATHER / 9.4</span><span>REGISTRO DA ESTAÇÃO</span></footer>
+  </main>
+</body>
 </html>
